@@ -1,0 +1,43 @@
+{
+  "name": "reservation-system",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@fullcalendar/daygrid": "^6.1.15",
+    "@fullcalendar/interaction": "^6.1.15",
+    "@fullcalendar/react": "^6.1.15",
+    "@fullcalendar/timegrid": "^6.1.15",
+    "@reduxjs/toolkit": "^2.1.0",
+    "@types/react-paginate": "^7.1.4",
+    "axios": "^1.6.7",
+    "bcryptjs": "^2.4.3",
+    "bootstrap": "^5.3.2",
+    "bootstrap-icons": "^1.11.3",
+    "jsonwebtoken": "^9.0.2",
+    "next": "14.1.0",
+    "next-connect": "^1.0.0",
+    "react": "^18.2.0",
+    "react-datepicker": "^5.0.0",
+    "react-dom": "^18.2.0",
+    "react-paginate": "^8.3.0",
+    "react-redux": "^9.1.0",
+    "sass": "^1.70.0",
+    "typescript": "^5.3.3"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/node": "^20.11.16",
+    "@types/react": "^18.2.52",
+    "@types/react-datepicker": "^4.19.5",
+    "@types/react-dom": "^18.2.18",
+    "eslint": "^8.56.0",
+    "eslint-config-next": "14.1.0"
+  }
+}
