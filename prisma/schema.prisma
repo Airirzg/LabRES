@@ -14,34 +14,34 @@ datasource db {
 }
 
 model User {
-  id          Int           @id @default(autoincrement())
-  firstName   String
-  lastName    String
-  phoneNumber String?
-  email       String        @unique
-  password    String
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  teams       TeamMember[]
-  leadingTeams Team[]       @relation("TeamLeader")
-  reservations Reservation[]
+  id            String        @id @default(cuid())
+  firstName     String
+  lastName      String
+  email         String        @unique
+  password      String
+  phoneNumber   String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  role          Role          @default(USER)
+  reservations  Reservation[]
+  teamMembers   TeamMember[]
+  notifications Notification[]
 }
 
 model Team {
-  id          Int           @id @default(autoincrement())
-  teamName    String
-  leaderId    Int
-  leader      User          @relation("TeamLeader", fields: [leaderId], references: [id])
-  members     TeamMember[]
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id           String        @id @default(cuid())
+  teamName     String
+  leaderId     String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  members      TeamMember[]
   reservations Reservation[]
 }
 
 model TeamMember {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  teamId    Int
+  id        String   @id @default(cuid())
+  userId    String
+  teamId    String
   joinedAt  DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id])
   team      Team     @relation(fields: [teamId], references: [id])
@@ -72,24 +72,23 @@ model Admin {
 }
 
 model Equipment {
-  id           Int           @id @default(autoincrement())
+  id           String        @id @default(cuid())
   name         String
   description  String?
-  categoryId   Int
-  category     Category      @relation(fields: [categoryId], references: [id])
-  status       String        @default("available")
+  imageUrl     String?
+  status       Status        @default(AVAILABLE)
   location     String?
+  categoryId   String
   availability Boolean       @default(true)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
+  category     Category      @relation(fields: [categoryId], references: [id])
   reservations Reservation[]
-
-  @@index([categoryId])
 }
 
 model Category {
-  id          Int         @id @default(autoincrement())
-  name        String      @unique
+  id          String      @id @default(cuid())
+  name        String
   description String?
   equipment   Equipment[]
   createdAt   DateTime    @default(now())
@@ -97,21 +96,57 @@ model Category {
 }
 
 model Reservation {
-  id          Int       @id @default(autoincrement())
-  userId      Int?
-  teamId      Int?
-  equipmentId Int
+  id          String           @id @default(cuid())
+  userId      String?
+  teamId      String?
+  equipmentId String
   startDate   DateTime
   endDate     DateTime
-  status      String    @default("pending")
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  user        User?     @relation(fields: [userId], references: [id])
-  team        Team?     @relation(fields: [teamId], references: [id])
-  equipment   Equipment @relation(fields: [equipmentId], references: [id])
+  status      ReservationStatus @default(PENDING)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  user        User?            @relation(fields: [userId], references: [id])
+  team        Team?            @relation(fields: [teamId], references: [id])
+  equipment   Equipment        @relation(fields: [equipmentId], references: [id])
 
   @@index([userId])
   @@index([teamId])
   @@index([equipmentId])
   @@index([startDate, endDate])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  type      NotificationType
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id])
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum Status {
+  AVAILABLE
+  MAINTENANCE
+  IN_USE
+}
+
+enum ReservationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  ONGOING
+  FINISHED
+}
+
+enum NotificationType {
+  RESERVATION_UPDATE
+  EQUIPMENT_UPDATE
+  SYSTEM
 }
