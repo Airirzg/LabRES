@@ -1,0 +1,117 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          Int           @id @default(autoincrement())
+  firstName   String
+  lastName    String
+  phoneNumber String?
+  email       String        @unique
+  password    String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  teams       TeamMember[]
+  leadingTeams Team[]       @relation("TeamLeader")
+  reservations Reservation[]
+}
+
+model Team {
+  id          Int           @id @default(autoincrement())
+  teamName    String
+  leaderId    Int
+  leader      User          @relation("TeamLeader", fields: [leaderId], references: [id])
+  members     TeamMember[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  reservations Reservation[]
+}
+
+model TeamMember {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  teamId    Int
+  joinedAt  DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  team      Team     @relation(fields: [teamId], references: [id])
+
+  @@unique([userId, teamId])
+}
+
+model Client {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  entity    String?
+  isTeam    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Admin {
+  id          Int      @id @default(autoincrement())
+  username    String   @unique
+  password    String
+  email       String   @unique
+  phoneNumber String?
+  firstName   String
+  lastName    String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Equipment {
+  id           Int           @id @default(autoincrement())
+  name         String
+  description  String?
+  categoryId   Int
+  category     Category      @relation(fields: [categoryId], references: [id])
+  status       String        @default("available")
+  location     String?
+  availability Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  reservations Reservation[]
+
+  @@index([categoryId])
+}
+
+model Category {
+  id          Int         @id @default(autoincrement())
+  name        String      @unique
+  description String?
+  equipment   Equipment[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model Reservation {
+  id          Int       @id @default(autoincrement())
+  userId      Int?
+  teamId      Int?
+  equipmentId Int
+  startDate   DateTime
+  endDate     DateTime
+  status      String    @default("pending")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        User?     @relation(fields: [userId], references: [id])
+  team        Team?     @relation(fields: [teamId], references: [id])
+  equipment   Equipment @relation(fields: [equipmentId], references: [id])
+
+  @@index([userId])
+  @@index([teamId])
+  @@index([equipmentId])
+  @@index([startDate, endDate])
+}
