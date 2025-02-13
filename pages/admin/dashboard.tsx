@@ -1,19 +1,88 @@
-import React, { useState, useEffect } from 'react';
-import { FiHome, FiBox, FiCalendar, FiUsers, FiMessageSquare, FiSettings, FiBell, FiUser } from 'react-icons/fi';
-import { Equipment, Reservation } from '@prisma/client';
+import { useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
+import FullCalendar from '@fullcalendar/react';
+import dayGridPlugin from '@fullcalendar/daygrid';
+import interactionPlugin from '@fullcalendar/interaction';
+import { toast, ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+import ReactPaginate from 'react-paginate';
+import { z } from 'zod';
 import Link from 'next/link';
+import { FiHome, FiBox, FiCalendar, FiUsers, FiMessageSquare, FiSettings, FiBell, FiUser } from 'react-icons/fi';
 import dynamic from 'next/dynamic';
 
 const Chart = dynamic(() => import('react-apexcharts'), { ssr: false });
 
-const AdminDashboard = () => {
-  const [equipment, setEquipment] = useState<Equipment[]>([]);
+import styles from '@/styles/AdminDashboard.module.css';
+
+interface Reservation {
+  id: string;
+  userId: string;
+  equipmentId: string;
+  startDate: string;
+  endDate: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ONGOING' | 'FINISHED';
+  user: {
+    name: string;
+    email: string;
+  };
+  equipment: {
+    name: string;
+  };
+}
+
+const statusColors = {
+  PENDING: '#ffd700',
+  APPROVED: '#4caf50',
+  REJECTED: '#f44336',
+  ONGOING: '#2196f3',
+  FINISHED: '#9e9e9e',
+};
+
+const itemsPerPage = 10;
+
+export default function AdminDashboard() {
+  const { data: session } = useSession();
   const [reservations, setReservations] = useState<Reservation[]>([]);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [currentPage, setCurrentPage] = useState(0);
+  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState('');
   const [adminName, setAdminName] = useState('Admin User');
+  const [equipment, setEquipment] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [totalPages, setTotalPages] = useState(0);
 
   useEffect(() => {
-    fetchDashboardData();
+    // Initialize SSE connection
+    const eventSource = new EventSource('/api/admin/events');
+
+    eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      setReservations(data);
+    };
+
+    eventSource.addEventListener('initial', (event) => {
+      const data = JSON.parse(event.data);
+      setReservations(data);
+    });
+
+    eventSource.addEventListener('update', (event) => {
+      const updatedReservation = JSON.parse(event.data);
+      setReservations(prev => 
+        prev.map(res => 
+          res.id === updatedReservation.id ? updatedReservation : res
+        )
+      );
+      toast.success('Reservation updated!');
+    });
+
+    // Fetch equipment data
+    fetch('/api/admin/equipment')
+      .then(res => res.json())
+      .then(data => setEquipment(data))
+      .catch(error => console.error('Error fetching equipment:', error));
+
     // Fetch admin profile
     fetch('/api/admin/profile')
       .then(res => res.json())
@@ -23,67 +92,92 @@ const AdminDashboard = () => {
         }
       })
       .catch(error => console.error('Error fetching admin profile:', error));
+
+    return () => {
+      eventSource.close();
+    };
   }, []);
 
-  const fetchDashboardData = async () => {
+  const handleStatusChange = async (reservationId: string, newStatus: string) => {
     try {
-      const [equipmentRes, reservationsRes] = await Promise.all([
-        fetch('/api/admin/equipment'),
-        fetch('/api/admin/reservations')
-      ]);
+      const response = await fetch(`/api/reservations/${reservationId}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: newStatus }),
+      });
 
-      if (!equipmentRes.ok || !reservationsRes.ok) {
-        throw new Error('Failed to fetch dashboard data');
-      }
-
-      const equipmentData = await equipmentRes.json();
-      const reservationsData = await reservationsRes.json();
-
-      setEquipment(Array.isArray(equipmentData) ? equipmentData : []);
-      setReservations(Array.isArray(reservationsData) ? reservationsData : []);
+      if (!response.ok) throw new Error('Failed to update status');
+      toast.success('Status updated successfully');
     } catch (error) {
-      console.error('Error fetching dashboard data:', error);
-      setEquipment([]);
-      setReservations([]);
+      toast.error('Failed to update status');
+      console.error(error);
     }
   };
 
-  const chartOptions = {
-    chart: {
-      type: 'line',
-      toolbar: {
-        show: false
-      }
-    },
-    stroke: {
-      curve: 'smooth',
-      width: 2
-    },
-    colors: ['#0d6efd', '#198754'],
-    grid: {
-      borderColor: '#f1f1f1',
-    },
-    xaxis: {
-      categories: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun']
-    },
-    legend: {
-      position: 'top'
+  const calendarEvents = reservations.map((reservation) => ({
+    id: reservation.id,
+    title: `${reservation.equipment.name} - ${reservation.user.name}`,
+    start: reservation.startDate,
+    end: reservation.endDate,
+    backgroundColor: statusColors[reservation.status],
+    extendedProps: { reservation }
+  }));
+
+  const handleEventClick = (info: any) => {
+    const reservation = info.event.extendedProps.reservation;
+    if (reservation.status === 'PENDING') {
+      toast(
+        <div>
+          <p className="mb-2">{reservation.equipment.name} reserved by {reservation.user.name}</p>
+          <p className="mb-2">From: {new Date(reservation.startDate).toLocaleString()}</p>
+          <p className="mb-0">To: {new Date(reservation.endDate).toLocaleString()}</p>
+          <div className="d-flex gap-2 mt-3">
+            <button
+              onClick={() => handleStatusChange(reservation.id, 'APPROVED')}
+              className="btn btn-success btn-sm"
+            >
+              Approve
+            </button>
+            <button
+              onClick={() => handleStatusChange(reservation.id, 'REJECTED')}
+              className="btn btn-danger btn-sm"
+            >
+              Reject
+            </button>
+          </div>
+        </div>,
+        { autoClose: false }
+      );
     }
   };
 
-  const chartSeries = [
-    {
-      name: 'Equipment Usage',
-      data: [30, 40, 35, 50, 49, 60]
-    },
-    {
-      name: 'Reservations',
-      data: [20, 35, 40, 45, 39, 45]
-    }
-  ];
+  const filteredReservations = reservations
+    .filter((reservation) => {
+      if (filterStatus === 'all') return true;
+      return reservation.status === filterStatus;
+    })
+    .filter((reservation) => {
+      const searchString = searchTerm.toLowerCase();
+      return (
+        reservation.user.name.toLowerCase().includes(searchString) ||
+        reservation.equipment.name.toLowerCase().includes(searchString) ||
+        reservation.id.toLowerCase().includes(searchString)
+      );
+    });
+
+  const handlePageChange = ({ selected }: { selected: number }) => {
+    setCurrentPage(selected);
+  };
+
+  const offset = currentPage * itemsPerPage;
+  const currentReservations = filteredReservations.slice(offset, offset + itemsPerPage);
+  const pageCount = Math.ceil(filteredReservations.length / itemsPerPage);
 
   return (
     <div className="min-vh-100 bg-light">
+      <ToastContainer />
       <div className="container-fluid">
         <div className="row">
           {/* Sidebar */}
@@ -110,9 +204,6 @@ const AdminDashboard = () => {
                   <Link href="/admin/messages" className="nav-link text-white mb-2 d-flex align-items-center">
                     <FiMessageSquare className="me-2" /> Messages
                   </Link>
-                  <Link href="/admin/profile" className="nav-link text-white mb-2 d-flex align-items-center">
-                    <FiUser className="me-2" /> Profile
-                  </Link>
                 </div>
               </div>
               <div className="mt-auto pt-3 border-top">
@@ -128,166 +219,213 @@ const AdminDashboard = () => {
             {/* Header */}
             <nav className="navbar navbar-expand-lg navbar-light bg-white shadow-sm mb-4 rounded">
               <div className="container-fluid">
-                <div className="d-flex justify-content-between align-items-center">
-                  <h5 className="card-title mb-0">Admin Dashboard</h5>
-                  <Link href="/admin/profile" className="text-decoration-none">
-                    <span className="text-primary">{adminName}</span>
-                  </Link>
-                </div>
-                <div className="d-flex align-items-center">
-                  <button className="btn btn-link position-relative me-3">
-                    <FiBell className="text-muted" size={20} />
-                    <span className="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
-                      3
-                    </span>
-                  </button>
+                <div className="d-flex justify-content-between align-items-center w-100">
+                  <h4 className="mb-0">Dashboard Overview</h4>
                   <div className="d-flex align-items-center">
-                    <div className="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center me-2" style={{ width: '40px', height: '40px' }}>
-                      <i className="bi bi-person-fill"></i>
-                    </div>
+                    <button className="btn btn-link position-relative me-3">
+                      <FiBell className="text-muted" size={20} />
+                      <span className="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                        {reservations.filter(r => r.status === 'PENDING').length}
+                      </span>
+                    </button>
+                    <span className="text-primary">{adminName}</span>
                   </div>
                 </div>
               </div>
             </nav>
 
-            <div className="container-fluid px-4">
+            <div className="container-fluid">
               {/* Statistics Cards */}
               <div className="row g-4 mb-4">
                 <div className="col-12 col-sm-6 col-xl-3">
-                  <div className="card">
+                  <div className="card h-100 shadow-sm">
                     <div className="card-body">
                       <div className="d-flex justify-content-between align-items-start">
                         <div>
                           <h6 className="card-subtitle mb-1 text-muted">Total Equipment</h6>
-                          <h4 className="card-title mb-0">
-                            {Array.isArray(equipment) ? equipment.length : 0}
-                          </h4>
+                          <h4 className="card-title mb-0">{equipment.length}</h4>
                         </div>
                         <div className="p-2 bg-primary bg-opacity-10 rounded-3">
                           <FiBox className="text-primary" size={24} />
                         </div>
-                      </div>
-                      <div className="mt-3">
-                        <small className="text-success">↑ 12%</small>
-                        <small className="text-muted ms-2">from last month</small>
                       </div>
                     </div>
                   </div>
                 </div>
 
                 <div className="col-12 col-sm-6 col-xl-3">
-                  <div className="card">
+                  <div className="card h-100 shadow-sm">
                     <div className="card-body">
                       <div className="d-flex justify-content-between align-items-start">
                         <div>
                           <h6 className="card-subtitle mb-1 text-muted">Active Reservations</h6>
                           <h4 className="card-title mb-0">
-                            {Array.isArray(reservations) ? reservations.length : 0}
+                            {reservations.filter(r => r.status === 'ONGOING').length}
                           </h4>
                         </div>
                         <div className="p-2 bg-success bg-opacity-10 rounded-3">
                           <FiCalendar className="text-success" size={24} />
                         </div>
                       </div>
-                      <div className="mt-3">
-                        <small className="text-success">↑ 8%</small>
-                        <small className="text-muted ms-2">from last week</small>
-                      </div>
                     </div>
                   </div>
                 </div>
 
                 <div className="col-12 col-sm-6 col-xl-3">
-                  <div className="card">
+                  <div className="card h-100 shadow-sm">
                     <div className="card-body">
                       <div className="d-flex justify-content-between align-items-start">
                         <div>
-                          <h6 className="card-subtitle mb-1 text-muted">Available Equipment</h6>
+                          <h6 className="card-subtitle mb-1 text-muted">Pending Reservations</h6>
                           <h4 className="card-title mb-0">
-                            {Array.isArray(equipment) ? equipment.filter(e => e.status === 'AVAILABLE').length : 0}
-                          </h4>
-                        </div>
-                        <div className="p-2 bg-info bg-opacity-10 rounded-3">
-                          <FiBox className="text-info" size={24} />
-                        </div>
-                      </div>
-                      <div className="mt-3">
-                        <small className="text-success">↑ 5%</small>
-                        <small className="text-muted ms-2">from yesterday</small>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="col-12 col-sm-6 col-xl-3">
-                  <div className="card">
-                    <div className="card-body">
-                      <div className="d-flex justify-content-between align-items-start">
-                        <div>
-                          <h6 className="card-subtitle mb-1 text-muted">Maintenance Items</h6>
-                          <h4 className="card-title mb-0">
-                            {Array.isArray(equipment) ? equipment.filter(e => e.status === 'MAINTENANCE').length : 0}
+                            {reservations.filter(r => r.status === 'PENDING').length}
                           </h4>
                         </div>
                         <div className="p-2 bg-warning bg-opacity-10 rounded-3">
-                          <FiSettings className="text-warning" size={24} />
+                          <FiCalendar className="text-warning" size={24} />
                         </div>
                       </div>
-                      <div className="mt-3">
-                        <small className="text-danger">↓ 2%</small>
-                        <small className="text-muted ms-2">from last week</small>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="col-12 col-sm-6 col-xl-3">
+                  <div className="card h-100 shadow-sm">
+                    <div className="card-body">
+                      <div className="d-flex justify-content-between align-items-start">
+                        <div>
+                          <h6 className="card-subtitle mb-1 text-muted">Completed Reservations</h6>
+                          <h4 className="card-title mb-0">
+                            {reservations.filter(r => r.status === 'FINISHED').length}
+                          </h4>
+                        </div>
+                        <div className="p-2 bg-info bg-opacity-10 rounded-3">
+                          <FiCalendar className="text-info" size={24} />
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Charts and Recent Activity */}
-              <div className="row g-4">
-                <div className="col-12 col-lg-8">
-                  <div className="card">
-                    <div className="card-body">
-                      <h5 className="card-title mb-4">Usage Statistics</h5>
-                      <Chart
-                        options={chartOptions}
-                        series={chartSeries}
-                        type="line"
-                        height={350}
+              {/* Calendar View */}
+              <div className="card mb-4 shadow-sm">
+                <div className="card-body">
+                  <h5 className="card-title mb-4">Reservation Calendar</h5>
+                  <FullCalendar
+                    plugins={[dayGridPlugin, interactionPlugin]}
+                    initialView="dayGridMonth"
+                    events={calendarEvents}
+                    eventClick={handleEventClick}
+                    height="auto"
+                    eventTimeFormat={{
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      meridiem: false,
+                      hour12: false
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Filters and Table */}
+              <div className="card shadow-sm">
+                <div className="card-body">
+                  <div className="d-flex justify-content-between align-items-center mb-4">
+                    <h5 className="card-title mb-0">Recent Reservations</h5>
+                    <div className="d-flex gap-3">
+                      <select
+                        className="form-select"
+                        value={filterStatus}
+                        onChange={(e) => setFilterStatus(e.target.value)}
+                      >
+                        <option value="all">All Status</option>
+                        <option value="PENDING">Pending</option>
+                        <option value="APPROVED">Approved</option>
+                        <option value="REJECTED">Rejected</option>
+                        <option value="ONGOING">Ongoing</option>
+                        <option value="FINISHED">Finished</option>
+                      </select>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Search..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
                       />
                     </div>
                   </div>
-                </div>
 
-                <div className="col-12 col-lg-4">
-                  <div className="card">
-                    <div className="card-body">
-                      <h5 className="card-title mb-4">Recent Activity</h5>
-                      <div className="list-group list-group-flush">
-                        {Array.isArray(reservations) ? reservations.slice(0, 5).map((reservation, index) => (
-                          <div key={index} className="list-group-item border-0 px-0">
-                            <div className="d-flex justify-content-between align-items-center">
-                              <div className="d-flex align-items-center">
-                                <div className="p-2 bg-primary bg-opacity-10 rounded-3 me-3">
-                                  <FiCalendar className="text-primary" />
+                  <div className="table-responsive">
+                    <table className="table table-hover">
+                      <thead>
+                        <tr>
+                          <th>ID</th>
+                          <th>User</th>
+                          <th>Equipment</th>
+                          <th>Start Time</th>
+                          <th>End Time</th>
+                          <th>Status</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {currentReservations.map((reservation) => (
+                          <tr key={reservation.id}>
+                            <td>{reservation.id}</td>
+                            <td>{reservation.user?.name || 'Unknown'}</td>
+                            <td>{reservation.equipment?.name || 'Unknown'}</td>
+                            <td>{new Date(reservation.startDate).toLocaleString()}</td>
+                            <td>{new Date(reservation.endDate).toLocaleString()}</td>
+                            <td>
+                              <span className={`badge bg-${getStatusColor(reservation.status)}`}>
+                                {reservation.status}
+                              </span>
+                            </td>
+                            <td>
+                              {reservation.status === 'PENDING' && (
+                                <div className="btn-group">
+                                  <button
+                                    onClick={() => handleStatusChange(reservation.id, 'APPROVED')}
+                                    className="btn btn-sm btn-success"
+                                  >
+                                    Approve
+                                  </button>
+                                  <button
+                                    onClick={() => handleStatusChange(reservation.id, 'REJECTED')}
+                                    className="btn btn-sm btn-danger"
+                                  >
+                                    Reject
+                                  </button>
                                 </div>
-                                <div>
-                                  <h6 className="mb-0">New Reservation</h6>
-                                  <small className="text-muted">
-                                    {new Date(reservation.startTime).toLocaleDateString()}
-                                  </small>
-                                </div>
-                              </div>
-                              <small className="text-muted">
-                                {new Date(reservation.startTime).toLocaleTimeString()}
-                              </small>
-                            </div>
-                          </div>
-                        )) : (
-                          <p className="text-muted text-center py-3">No recent activity</p>
-                        )}
-                      </div>
-                    </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
+
+                  {/* Pagination */}
+                  <ReactPaginate
+                    previousLabel={'Previous'}
+                    nextLabel={'Next'}
+                    breakLabel={'...'}
+                    pageCount={pageCount}
+                    marginPagesDisplayed={2}
+                    pageRangeDisplayed={5}
+                    onPageChange={handlePageChange}
+                    containerClassName={'pagination justify-content-center mt-4'}
+                    pageClassName={'page-item'}
+                    pageLinkClassName={'page-link'}
+                    previousClassName={'page-item'}
+                    previousLinkClassName={'page-link'}
+                    nextClassName={'page-item'}
+                    nextLinkClassName={'page-link'}
+                    breakClassName={'page-item'}
+                    breakLinkClassName={'page-link'}
+                    activeClassName={'active'}
+                  />
                 </div>
               </div>
             </div>
@@ -296,6 +434,21 @@ const AdminDashboard = () => {
       </div>
     </div>
   );
-};
+}
 
-export default AdminDashboard;
+function getStatusColor(status: string) {
+  switch (status) {
+    case 'PENDING':
+      return 'warning';
+    case 'APPROVED':
+      return 'success';
+    case 'REJECTED':
+      return 'danger';
+    case 'ONGOING':
+      return 'info';
+    case 'FINISHED':
+      return 'secondary';
+    default:
+      return 'primary';
+  }
+}

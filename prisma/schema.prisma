@@ -126,6 +126,17 @@ model Notification {
   user      User             @relation(fields: [userId], references: [id])
 }
 
+model Message {
+  id          String    @id @default(cuid())
+  subject     String
+  content     String
+  senderName  String
+  senderEmail String
+  status      MessageStatus @default(UNREAD)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
 enum Role {
   USER
   ADMIN
@@ -149,4 +160,10 @@ enum NotificationType {
   RESERVATION_UPDATE
   EQUIPMENT_UPDATE
   SYSTEM
+}
+
+enum MessageStatus {
+  UNREAD
+  READ
+  ARCHIVED
 }

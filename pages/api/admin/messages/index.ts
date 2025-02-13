@@ -1,12 +1,19 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { prisma } from '@/lib/prisma';
+import prisma from '@/lib/prisma';
+import { getSession } from 'next-auth/react';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'GET') {
-    return res.status(405).json({ message: 'Method not allowed' });
-  }
-
   try {
+    const session = await getSession({ req });
+
+    if (!session || session.user.role !== 'ADMIN') {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    if (req.method !== 'GET') {
+      return res.status(405).json({ message: 'Method not allowed' });
+    }
+
     const page = parseInt(req.query.page as string) || 0;
     const limit = parseInt(req.query.limit as string) || 10;
     const search = (req.query.search as string) || '';
@@ -35,12 +42,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Get total count for pagination
     const total = await prisma.message.count({ where });
 
+    // If there are no messages, return empty result
+    if (total === 0) {
+      return res.status(200).json({
+        items: [],
+        totalPages: 0,
+        currentPage: 0,
+        totalItems: 0,
+      });
+    }
+
     // Get messages with pagination, search, and filter
     const messages = await prisma.message.findMany({
       where,
       skip,
       take: limit,
       orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        subject: true,
+        content: true,
+        senderName: true,
+        senderEmail: true,
+        status: true,
+        createdAt: true,
+      },
     });
 
     // Calculate total pages

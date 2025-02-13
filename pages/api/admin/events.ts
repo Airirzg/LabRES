@@ -1,39 +1,70 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { prisma } from '@/lib/prisma';
+import { getSession } from 'next-auth/react';
+import prisma from '@/lib/prisma';
+
+// Store connected clients
+const clients = new Set<NextApiResponse>();
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'GET') {
-    return res.status(405).json({ message: 'Method not allowed' });
+  const session = await getSession({ req });
+
+  if (!session || session.user.role !== 'ADMIN') {
+    return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  // Set headers for SSE
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Content-Encoding', 'none');
+  if (req.method === 'GET') {
+    // Set headers for SSE
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
 
-  // Function to send SSE data
-  const sendEvent = (data: any) => {
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
-  };
+    // Add client to the set
+    clients.add(res);
 
-  // Keep connection alive
-  const keepAlive = setInterval(() => {
-    res.write(': keep-alive\n\n');
-  }, 30000);
+    // Remove client when connection is closed
+    req.on('close', () => {
+      clients.delete(res);
+    });
 
-  // Clean up on close
-  res.on('close', () => {
-    clearInterval(keepAlive);
-    res.end();
-  });
+    // Send initial data
+    const reservations = await prisma.reservation.findMany({
+      include: {
+        user: true,
+        equipment: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 10,
+    });
 
-  // Send initial connection established event
-  sendEvent({ type: 'connected' });
+    sendEventToClient(res, 'initial', reservations);
 
-  // Keep the connection open
-  req.on('close', () => {
-    clearInterval(keepAlive);
+    // Keep connection alive
+    const keepAlive = setInterval(() => {
+      res.write(':keepalive\n\n');
+    }, 30000);
+
+    // Clean up on close
+    req.on('close', () => {
+      clearInterval(keepAlive);
+    });
+  } else {
+    res.setHeader('Allow', ['GET']);
+    res.status(405).end(`Method ${req.method} Not Allowed`);
+  }
+}
+
+// Helper function to send events to a specific client
+function sendEventToClient(client: NextApiResponse, event: string, data: any) {
+  client.write(`event: ${event}\n`);
+  client.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+// Export function to broadcast events to all clients
+export function broadcastEvent(event: string, data: any) {
+  clients.forEach(client => {
+    sendEventToClient(client, event, data);
   });
 }
 
